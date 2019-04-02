@@ -5,12 +5,16 @@ This is a simple python implementation of `evidence based scheduling`_ (à la
 Joel Spolsky).  It generates confidence plots for project completion dates
 from a list of task estimates and a set of scheduling rules.
 
+By providing Jira server credentials it can load project tasks from Jira server.
+Note: Some dependencies added in order to support charts' Persian titles.
+
 Dependencies
 -------------
 
 * numpy
 * matplotlib (must be configured w/ interactive backend)
 * python-dateutil
+* Jira
 
 Usage
 -------
