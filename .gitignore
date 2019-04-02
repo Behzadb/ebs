@@ -1,0 +1,10 @@
+*.pyc
+*.csv
+*.ods
+*.png
+*.jpg
+*.pdf
+config.py
+venv/
+
+\.idea/
