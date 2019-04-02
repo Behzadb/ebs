@@ -1,15 +1,22 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 import collections
 import csv
 import random
 import sys
 
+from jira import JIRA
+from config import JIRA_CONFIG
+
 from datetime import datetime, time, timedelta
+from bidi.algorithm import get_display
+import arabic_reshaper
 
 import numpy as np
 from matplotlib import dates, pyplot
 
 random.seed()
+
 
 class Evidence(object):
     def __init__(self, filepath):
@@ -45,7 +52,7 @@ class Evidence(object):
                         self.proj_todo[project].append(estimate)
                         if project not in self.projects:
                             self.projects.append(project)
-        self.velocity = [e/a for e, a in zip(self.estimate, self.actual)]
+        self.velocity = [e / a for e, a in zip(self.estimate, self.actual) if e > 0]
         self.velocity.sort()
 
         # determine buffer factor for task left out of estimates
@@ -57,18 +64,19 @@ class Evidence(object):
                 pass
             else:
                 if est_actual > 0:
-                    self.proj_buffer.append(all_actual/est_actual)
+                    self.proj_buffer.append(all_actual / est_actual)
         self.proj_buffer.sort()
 
     def cdf(self, velocity):
-        cdfx = [1/v for v in velocity]
+        cdfx = [1 / v for v in velocity]
         cdfx.sort()
         count = len(cdfx)
-        cdfy = [float(i+1)/count for i in range(count)]
+        cdfy = [float(i + 1) / count for i in range(count)]
         return cdfx, cdfy
 
     count = 1000
-    def montecarlo(self, count=None):
+
+    def montecarlo(self, count=10000):
         count = count or self.count
         runs = dict((p, []) for p in self.projects)
         for i in range(count):
@@ -118,28 +126,69 @@ class Schedule(object):
 
     def plot(self, montecarlo, title):
         cd = self.calendar_days(montecarlo)
-        y = np.linspace(10,100,10)
+        y = np.linspace(10, 100, 10)
         lscmap = pyplot.get_cmap('copper', lut=len(montecarlo))
         for i, (p, x) in enumerate(cd.iteritems()):
             pyplot.plot(x, y, label=p, linewidth=2, color=lscmap(i));
         pyplot.legend(loc='best');
-        pyplot.title(title);
-        pyplot.xlabel('Completion date');
-        pyplot.ylabel('Confidence');
+        pyplot.title(get_display(arabic_reshaper.reshape(title)));
+        pyplot.xlabel(get_display(arabic_reshaper.reshape(u'تاریخ تکمیل')));  # Completion date
+        pyplot.ylabel(get_display(arabic_reshaper.reshape(u'اطمینان')));  # Confidence
         pyplot.grid();
-        pyplot.axes().xaxis.set_major_formatter(dates.DateFormatter('%b %d'));
+        pyplot.axes().xaxis.set_major_formatter(dates.DateFormatter('%Y %b %d'));
+        pyplot.xticks(rotation='vertical')
+        pyplot.tight_layout()
         pyplot.show()
 
-def main():
+
+def get_jira():
+    return JIRA(server=JIRA_CONFIG['SERVER'], basic_auth=(JIRA_CONFIG['username'], JIRA_CONFIG['password']))
+
+
+def get_project_issues(project_name='.'):
+    jira = get_jira()
+    if (project_name == '.'):
+        project_issues = jira.search_issues(jql_str='timeoriginalestimate>0',
+                                            maxResults=10000)
+    else:
+        project_issues = jira.search_issues(jql_str='project=' + project_name + ' and timeoriginalestimate>0',
+                                            maxResults=10000)
+    issues = []
+    issues.append(['project', 'task', 'estimate', 'actual'])
+    for issue in project_issues:
+        if issue.fields.timespent == None or issue.fields.timespent == 0:
+            issue.fields.timespent = 0
+        issues.append(
+            [issue.fields.project.key, issue.key, issue.fields.aggregatetimeestimate / 3600,
+             issue.fields.timespent / 60,
+             issue.fields.assignee])
+    return issues
+
+
+def get_users():
+    jira = get_jira()
+    return jira.search_users(startAt=0, user='.')
+
+
+def main(project_name):
     context = {}
     execfile(sys.argv[2], context)
     start = context.get('start', datetime.now())
     rules = context['rules']
     schedule = Schedule(start, rules)
-    ebs = Evidence(sys.argv[1])
-    title = 'Dev schedule: current projects'
+    ebs = Evidence("tasks_" + project_name + ".csv")
+    title = project_name + u': تخمین زمان تکمیل تسک‌های انجام نشده'  # Estimated time for completion of remaining tasks
     schedule.plot(ebs.montecarlo(), title)
 
-if __name__ == '__main__':
-    main()
 
+if __name__ == '__main__':
+    project_name = sys.argv[1]
+    if project_name == '.':
+        project_name = 'AllProjects'
+        tasks = get_project_issues()
+    else:
+        tasks = get_project_issues(project_name)
+    with open("tasks_" + project_name + ".csv", "wb") as f:
+        writer = csv.writer(f)
+        writer.writerows(tasks)
+    main(project_name)
